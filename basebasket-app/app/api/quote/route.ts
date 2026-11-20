@@ -92,8 +92,10 @@ export async function POST(req: Request) {
         spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER,
         amount: totalUsdcForAssetA,
       });
-      calls.push({target: quoteA.transaction.to as 0x${string},
-value: BigInt(quoteA.transaction.value || "0"),
+      calls.push({
+        target: quoteA.transaction.to as `0x${string}`,
+        value: BigInt(quoteA.transaction.value || "0"),
+Use code with caution.
 callData: quoteA.transaction.data as 0x${string},
 });
 totalEthValue += BigInt(quoteA.transaction.value || "0");
@@ -179,7 +181,8 @@ token: BASE_ADDRESSES.USDC,
 spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER,
 amount: twentyForGrowth,
 });
-calls.push({target: quoteGrowth.transaction.to as 0x${string},
+calls.push({
+target: quoteGrowth.transaction.to as 0x${string},
 value: BigInt(quoteGrowth.transaction.value || "0"),
 callData: quoteGrowth.transaction.data as 0x${string},
 });
