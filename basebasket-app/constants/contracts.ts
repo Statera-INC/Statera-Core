@@ -10,6 +10,7 @@ export const BASE_ADDRESSES = {
   USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`,
   CBBTC: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" as `0x${string}`,
   WETH: "0x4200000000000000000000000000000000000006" as `0x${string}`,
+  WSTETH: "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452" as `0x${string}`,
 } as const;
 
 export const BASE_BASKET_ROUTER_ABI = [
@@ -18,11 +19,17 @@ export const BASE_BASKET_ROUTER_ABI = [
     name: "executeAtomicBasket",
     stateMutability: "payable",
     inputs: [
-      { name: "inputToken", type: "address" },
-      { name: "totalAmount", type: "uint256" },
-      { name: "feeBps", type: "uint256" },
-      { name: "outputToken", type: "address" },
-      { name: "minOutputAmount", type: "uint256" },
+      {
+        name: "order",
+        type: "tuple",
+        components: [
+          { name: "inputToken", type: "address" },
+          { name: "totalAmount", type: "uint256" },
+          { name: "feeBps", type: "uint256" },
+          { name: "outputToken", type: "address" },
+          { name: "minOutputAmount", type: "uint256" },
+        ],
+      },
       {
         name: "approvals",
         type: "tuple[]",
@@ -45,4 +52,28 @@ export const BASE_BASKET_ROUTER_ABI = [
     ],
     outputs: [],
   },
+  { type: "error", name: "ZeroAddress", inputs: [] },
+  { type: "error", name: "ZeroAmount", inputs: [] },
+  {
+    type: "error",
+    name: "FeeExceedsTierCap",
+    inputs: [
+      { name: "providedBps", type: "uint256" },
+      { name: "maxAllowedBps", type: "uint256" },
+    ],
+  },
+  {
+    type: "error",
+    name: "TargetNotWhitelisted",
+    inputs: [{ name: "target", type: "address" }],
+  },
+  {
+    type: "error",
+    name: "SlippageCheckFailed",
+    inputs: [
+      { name: "received", type: "uint256" },
+      { name: "minimum", type: "uint256" },
+    ],
+  },
+  { type: "error", name: "EthRefundFailed", inputs: [] },
 ] as const;
