@@ -4,23 +4,18 @@ import { coinbaseWallet, injected, walletConnect } from "wagmi/connectors";
 import { Attribution } from "ox/erc8021";
 
 export const BASE_BUILDER_SUFFIX = Attribution.toDataSuffix({
-  codes: ["bc_YOUR_BUILDER_CODE"],
+  codes: ["bc_uqmcppys"],
 });
+
+const wcId = process.env.NEXT_PUBLIC_WC_PROJECT_ID;
+const hasValidWc = wcId && wcId !== "your_walletconnect_project_id";
 
 export const wagmiConfig = createConfig({
   chains: [base, baseSepolia],
   connectors: [
     coinbaseWallet({ appName: "BaseBasket by Statera Inc.", preference: "all" }),
     injected({ target: "metaMask" }),
-    walletConnect({
-      projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID!,
-      metadata: {
-        name: "BaseBasket",
-        description: "Non-custodial atomic DeFi execution router on Base",
-        url: "https://basebasket.xyz",
-        icons: ["https://basebasket.xyz"],
-      },
-    }),
+    ...(hasValidWc ? [walletConnect({ projectId: wcId })] : []),
   ],
   transports: {
     [base.id]: http(),
