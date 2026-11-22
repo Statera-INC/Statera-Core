@@ -210,7 +210,13 @@ export default function BaseBasketTerminal() {
           e("button", {
             onClick: () => setActiveTab("presets"),
             className: "flex items-center gap-2 px-4 py-1.5 text-xs font-bold " + (activeTab === "presets" ? "win97-btn-pressed text-[#000080]" : "win97-btn text-black")
-          }, e(Layers, { className: "h-3.5 w-3.5" }), " Curated Presets"),
+          }, e("svg", { width: 14, height: 14, viewBox: "0 0 40 40", fill: "none" },
+            e("line", { x1: 6, y1: 14, x2: 34, y2: 14, stroke: "#000080", strokeWidth: 3.5, strokeLinecap: "square" }),
+            e("line", { x1: 20, y1: 14, x2: 20, y2: 28, stroke: "#111827", strokeWidth: 3 }),
+            e("polygon", { points: "20,21 12,33 28,33", fill: "#111827" }),
+            e("rect", { x: 6, y: 17, width: 7, height: 6, fill: "#111827" }),
+            e("rect", { x: 27, y: 17, width: 7, height: 6, fill: "#000080" })
+          ), " Curated Presets"),
           e("button", {
             onClick: () => setActiveTab("custom"),
             className: "flex items-center gap-2 px-4 py-1.5 text-xs font-bold " + (activeTab === "custom" ? "win97-btn-pressed text-[#000080]" : "win97-btn text-black")
