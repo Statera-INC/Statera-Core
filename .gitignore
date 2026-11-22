@@ -1,9 +1,26 @@
-.DS_Store
+# Secrets & Environment Variables
 .env
-node_modules/
-build/
-.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+private/
+
+# Dependencies & Build Artifacts
 node_modules/
 cache/
 artifacts/
+out/
+dist/
+build/
+typechain-types/
+coverage/
+
+# macOS & IDE Metadata
 .DS_Store
+.AppleDouble
+.LSOverride
+.vscode/
+.idea/
+*.log

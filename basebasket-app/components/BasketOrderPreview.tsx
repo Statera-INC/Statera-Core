@@ -171,7 +171,6 @@ export function BasketOrderPreview(props: any) {
         ),
         e("div", { className: "flex justify-between" },
           e("span", null, "Protocol Fee (" + feeQuote.feePercent + "%)"),
-Use code with caution.
 e("span", { className: "font-mono text-[#222222]" }, "-" + formatUnits(feeAmount, inputDecimals) + " " + inputSymbol)
 ),
 e("div", { className: "flex justify-between border-t border-[#808080] pt-1.5 font-bold" },

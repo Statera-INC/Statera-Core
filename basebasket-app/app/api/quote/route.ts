@@ -219,7 +219,6 @@ export async function POST(req: Request) {
 
       approvals.push(
         { token: preset.collateralAsset, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: assetAForLp },
-Use code with caution.
 { token: preset.lpPairAsset, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: assetBForLp }
 );
 calls.push({ target: BASE_ADDRESSES.AERODROME_ROUTER, value: BigInt("0"), callData: aerodromeCalldata });
