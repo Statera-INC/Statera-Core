@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
-import { encodeFunctionData, parseAbi } from "viem";
+import { createPublicClient, encodeFunctionData, http, parseAbi } from "viem";
+import { base } from "viem/chains";
 import { BASE_ADDRESSES, BASE_BASKET_ROUTER_ADDRESS } from "@/constants/contracts";
 import { BASKET_PRESETS } from "@/constants/presets";
 import { resolveBasketFeeTier } from "@/lib/feeTiers";
 
 type HexAddress = `0x${string}`;
+
+const AERODROME_DEFAULT_FACTORY = "0x420DD381b31aEf6683db6B902084cB0FFECe40Da" as HexAddress;
+
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("https://base.org"),
+});
 
 const MORPHO_BLUE_ABI = parseAbi([
   "function supplyCollateral((address loanToken, address collateralToken, address oracle, address irm, uint256 lltv) marketParams, uint256 assets, address onBehalf, bytes data) external",
@@ -12,34 +20,53 @@ const MORPHO_BLUE_ABI = parseAbi([
 ]);
 
 const AERODROME_ROUTER_ABI = parseAbi([
+  "function getAmountsOut(uint256 amountIn, (address from, address to, bool stable, address factory)[] routes) external view returns (uint256[] amounts)",
+  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, (address from, address to, bool stable, address factory)[] routes, address to, uint256 deadline) external returns (uint256[] amounts)",
   "function addLiquidity(address tokenA, address tokenB, bool stable, uint256 amountADesired, uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) external returns (uint256 amountA, uint256 amountB, uint256 liquidity)",
 ]);
 
-async function fetchZeroXQuote(
+function buildAerodromeRoutes(sellToken: HexAddress, buyToken: HexAddress) {
+  if (buyToken.toLowerCase() === BASE_ADDRESSES.WSTETH.toLowerCase()) {
+    return [
+      { from: sellToken, to: BASE_ADDRESSES.WETH, stable: false, factory: AERODROME_DEFAULT_FACTORY },
+      { from: BASE_ADDRESSES.WETH, to: BASE_ADDRESSES.WSTETH, stable: true, factory: AERODROME_DEFAULT_FACTORY },
+    ];
+  }
+  return [
+    { from: sellToken, to: buyToken, stable: false, factory: AERODROME_DEFAULT_FACTORY },
+  ];
+}
+
+async function fetchAerodromeOnchainQuote(
   sellToken: HexAddress,
   buyToken: HexAddress,
   sellAmount: bigint,
   slippageBps: number,
-  taker: HexAddress
+  recipient: HexAddress
 ) {
-  const params = new URLSearchParams({
-    chainId: "8453",
-    sellToken,
-    buyToken,
-    sellAmount: sellAmount.toString(),
-    taker,
-    slippageBps: slippageBps.toString(),
+  const routes = buildAerodromeRoutes(sellToken, buyToken);
+  const amounts = await publicClient.readContract({
+    address: BASE_ADDRESSES.AERODROME_ROUTER,
+    abi: AERODROME_ROUTER_ABI,
+    functionName: "getAmountsOut",
+    args: [sellAmount, routes],
   });
 
-  const endpoint = ["https://0x.org", "swap", "allowance-holder", "quote"].join("/");
-  const res = await fetch(endpoint + "?" + params.toString(), {
-    headers: {
-      "0x-api-key": process.env.ZERO_X_API_KEY!,
-      "0x-version": "v2",
-    },
+  const expectedOut = amounts[amounts.length - 1];
+  const minBuyAmount = (expectedOut * BigInt(10000 - slippageBps)) / BigInt("10000");
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+
+  const callData = encodeFunctionData({
+    abi: AERODROME_ROUTER_ABI,
+    functionName: "swapExactTokensForTokens",
+    args: [sellAmount, minBuyAmount, routes, recipient, deadline],
   });
-  if (!res.ok) throw new Error("0x Quote failed: " + (await res.text()));
-  return res.json();
+
+  return {
+    minBuyAmount,
+    target: BASE_ADDRESSES.AERODROME_ROUTER,
+    callData,
+  };
 }
 
 export async function POST(req: Request) {
@@ -64,7 +91,7 @@ export async function POST(req: Request) {
 
     const approvals: { token: HexAddress; spender: HexAddress; amount: bigint }[] = [];
     const calls: { target: HexAddress; value: bigint; callData: HexAddress }[] = [];
-    let totalEthValue = BigInt("0");
+    const totalEthValue = BigInt("0");
     let outputToken: HexAddress = "0x0000000000000000000000000000000000000000";
     let minOutputAmount = BigInt("0");
     let sweepTokens: HexAddress[] = [BASE_ADDRESSES.USDC];
@@ -95,17 +122,15 @@ export async function POST(req: Request) {
       }
 
       if (cbbtcPart > BigInt("0")) {
-        const qBtc = await fetchZeroXQuote(BASE_ADDRESSES.USDC, BASE_ADDRESSES.CBBTC, cbbtcPart, slippageBps, BASE_BASKET_ROUTER_ADDRESS);
-        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER, amount: cbbtcPart });
-        calls.push({ target: qBtc.transaction.to as HexAddress, value: BigInt(qBtc.transaction.value || "0"), callData: qBtc.transaction.data as HexAddress });
-        totalEthValue += BigInt(qBtc.transaction.value || "0");
+        const qBtc = await fetchAerodromeOnchainQuote(BASE_ADDRESSES.USDC, BASE_ADDRESSES.CBBTC, cbbtcPart, slippageBps, userAddress as HexAddress);
+        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: cbbtcPart });
+        calls.push({ target: qBtc.target, value: BigInt("0"), callData: qBtc.callData });
       }
 
       if (wethPart > BigInt("0")) {
-        const qEth = await fetchZeroXQuote(BASE_ADDRESSES.USDC, BASE_ADDRESSES.WETH, wethPart, slippageBps, BASE_BASKET_ROUTER_ADDRESS);
-        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER, amount: wethPart });
-        calls.push({ target: qEth.transaction.to as HexAddress, value: BigInt(qEth.transaction.value || "0"), callData: qEth.transaction.data as HexAddress });
-        totalEthValue += BigInt(qEth.transaction.value || "0");
+        const qEth = await fetchAerodromeOnchainQuote(BASE_ADDRESSES.USDC, BASE_ADDRESSES.WETH, wethPart, slippageBps, userAddress as HexAddress);
+        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: wethPart });
+        calls.push({ target: qEth.target, value: BigInt("0"), callData: qEth.callData });
       }
 
       return NextResponse.json({
@@ -132,10 +157,10 @@ export async function POST(req: Request) {
       const halfForMorpho = netUsdc / BigInt("2");
       const halfForLp = netUsdc - halfForMorpho;
       const quarterForLpAssetA = halfForLp / BigInt("2");
-      const quarterForLpUsdc = halfForLp - quarterForLpAssetA;
+      const quarterForLpPair = halfForLp - quarterForLpAssetA;
       const totalUsdcForAssetA = halfForMorpho + quarterForLpAssetA;
 
-      const quoteA = await fetchZeroXQuote(
+      const quoteA = await fetchAerodromeOnchainQuote(
         BASE_ADDRESSES.USDC,
         preset.collateralAsset,
         totalUsdcForAssetA,
@@ -143,13 +168,12 @@ export async function POST(req: Request) {
         BASE_BASKET_ROUTER_ADDRESS
       );
 
-      const minTotalAssetAOut = BigInt(quoteA.minBuyAmount);
+      const minTotalAssetAOut = quoteA.minBuyAmount;
       const assetAForMorpho = (minTotalAssetAOut * BigInt("2")) / BigInt("3");
       const assetAForLp = minTotalAssetAOut - assetAForMorpho;
 
-      approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER, amount: totalUsdcForAssetA });
-      calls.push({ target: quoteA.transaction.to as HexAddress, value: BigInt(quoteA.transaction.value || "0"), callData: quoteA.transaction.data as HexAddress });
-      totalEthValue += BigInt(quoteA.transaction.value || "0");
+      approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: totalUsdcForAssetA });
+      calls.push({ target: quoteA.target, value: BigInt("0"), callData: quoteA.callData });
 
       const morphoCalldata = encodeFunctionData({
         abi: MORPHO_BLUE_ABI,
@@ -159,19 +183,18 @@ export async function POST(req: Request) {
       approvals.push({ token: preset.collateralAsset, spender: BASE_ADDRESSES.MORPHO_BLUE, amount: assetAForMorpho });
       calls.push({ target: BASE_ADDRESSES.MORPHO_BLUE, value: BigInt("0"), callData: morphoCalldata });
 
-      let assetBForLp = quarterForLpUsdc;
+      let assetBForLp = quarterForLpPair;
       if (preset.lpPairAsset !== BASE_ADDRESSES.USDC) {
-        const quoteB = await fetchZeroXQuote(
+        const quoteB = await fetchAerodromeOnchainQuote(
           BASE_ADDRESSES.USDC,
           preset.lpPairAsset,
-          quarterForLpUsdc,
+          quarterForLpPair,
           slippageBps,
           BASE_BASKET_ROUTER_ADDRESS
         );
-        assetBForLp = BigInt(quoteB.minBuyAmount);
-        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER, amount: quarterForLpUsdc });
-        calls.push({ target: quoteB.transaction.to as HexAddress, value: BigInt(quoteB.transaction.value || "0"), callData: quoteB.transaction.data as HexAddress });
-        totalEthValue += BigInt(quoteB.transaction.value || "0");
+        assetBForLp = quoteB.minBuyAmount;
+        approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: quarterForLpPair });
+        calls.push({ target: quoteB.target, value: BigInt("0"), callData: quoteB.callData });
       }
 
       const minAmountALp = (assetAForLp * BigInt(10000 - slippageBps)) / BigInt("10000");
@@ -196,39 +219,35 @@ export async function POST(req: Request) {
 
       approvals.push(
         { token: preset.collateralAsset, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: assetAForLp },
-        { token: preset.lpPairAsset, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: assetBForLp }
-      );
-      calls.push({ target: BASE_ADDRESSES.AERODROME_ROUTER, value: BigInt("0"), callData: aerodromeCalldata });
-      sweepTokens = preset.lpPairAsset === BASE_ADDRESSES.USDC
-        ? [BASE_ADDRESSES.USDC, preset.collateralAsset]
-        : [BASE_ADDRESSES.USDC, preset.collateralAsset, preset.lpPairAsset];
-    }
-
-    if (preset.type === "ASYMMETRIC_80_20") {
-      const eightyForLending = (netUsdc * BigInt("8000")) / BigInt("10000");
-      const twentyForGrowth = netUsdc - eightyForLending;
-
-      const morphoSupplyCalldata = encodeFunctionData({
-        abi: MORPHO_BLUE_ABI,
-        functionName: "supply",
-        args: [preset.lendingMarket, eightyForLending, BigInt("0"), userAddress as HexAddress, "0x"],
-      });
-      approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.MORPHO_BLUE, amount: eightyForLending });
-      calls.push({ target: BASE_ADDRESSES.MORPHO_BLUE, value: BigInt("0"), callData: morphoSupplyCalldata });
-
-      const quoteGrowth = await fetchZeroXQuote(
-        BASE_ADDRESSES.USDC,
-        preset.growthAsset,
-        twentyForGrowth,
-        slippageBps,
-        BASE_BASKET_ROUTER_ADDRESS
-      );
-      approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.ZERO_X_ALLOWANCE_HOLDER, amount: twentyForGrowth });
-      calls.push({ target: quoteGrowth.transaction.to as HexAddress, value: BigInt(quoteGrowth.transaction.value || "0"), callData: quoteGrowth.transaction.data as HexAddress });
-      totalEthValue += BigInt(quoteGrowth.transaction.value || "0");
-
-      outputToken = preset.growthAsset;
-minOutputAmount = BigInt(quoteGrowth.minBuyAmount);
+Use code with caution.
+{ token: preset.lpPairAsset, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: assetBForLp }
+);
+calls.push({ target: BASE_ADDRESSES.AERODROME_ROUTER, value: BigInt("0"), callData: aerodromeCalldata });
+sweepTokens = preset.lpPairAsset === BASE_ADDRESSES.USDC
+? [BASE_ADDRESSES.USDC, preset.collateralAsset]
+: [BASE_ADDRESSES.USDC, preset.collateralAsset, preset.lpPairAsset];
+}
+if (preset.type === "ASYMMETRIC_80_20") {
+const eightyForLending = (netUsdc * BigInt("8000")) / BigInt("10000");
+const twentyForGrowth = netUsdc - eightyForLending;
+const morphoSupplyCalldata = encodeFunctionData({
+abi: MORPHO_BLUE_ABI,
+functionName: "supply",
+args: [preset.lendingMarket, eightyForLending, BigInt("0"), userAddress as HexAddress, "0x"],
+});
+approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.MORPHO_BLUE, amount: eightyForLending });
+calls.push({ target: BASE_ADDRESSES.MORPHO_BLUE, value: BigInt("0"), callData: morphoSupplyCalldata });
+const quoteGrowth = await fetchAerodromeOnchainQuote(
+BASE_ADDRESSES.USDC,
+preset.growthAsset,
+twentyForGrowth,
+slippageBps,
+userAddress as HexAddress
+);
+approvals.push({ token: BASE_ADDRESSES.USDC, spender: BASE_ADDRESSES.AERODROME_ROUTER, amount: twentyForGrowth });
+calls.push({ target: quoteGrowth.target, value: BigInt("0"), callData: quoteGrowth.callData });
+outputToken = preset.growthAsset;
+minOutputAmount = quoteGrowth.minBuyAmount;
 sweepTokens = [BASE_ADDRESSES.USDC, preset.growthAsset];
 }
 return NextResponse.json({
@@ -247,6 +266,6 @@ sweepTokens,
 ethValue: totalEthValue.toString(),
 });
 } catch (err: any) {
-return NextResponse.json({ error: err.message || "Failed to generate preset quote" }, { status: 500 });
+return NextResponse.json({ error: err.message || "Failed to generate onchain quote" }, { status: 500 });
 }
 }

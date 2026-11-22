@@ -147,7 +147,7 @@ export default function BaseBasketTerminal() {
     }
   };
 
-  const routerUrl = "https://basescan.org" + (BASE_BASKET_ROUTER_ADDRESS || "0x0000000000000000000000000000000000000000");
+  const routerUrl = "basescan.org" + (BASE_BASKET_ROUTER_ADDRESS || "0x0000000000000000000000000000000000000000");
 
   return e("div", { className: "relative min-h-screen pb-16 text-black" },
     e("header", { className: "win97-window sticky top-0 z-20 mx-auto flex max-w-6xl items-center justify-between px-4 py-2.5 sm:mt-3" },
