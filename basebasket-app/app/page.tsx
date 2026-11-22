@@ -10,9 +10,7 @@ import { BasketOrderPreview } from "@/components/BasketOrderPreview";
 const e = React.createElement;
 
 const SUPPORTED_ASSETS = Array(
-  { symbol: "USDC", name: "USD Coin", decimals: 2, usdPrice: 1, address: BASE_ADDRESSES.USDC, quickAmounts: Array(1000, 5000, 25000, 100000) },
-  { symbol: "ETH", name: "Ethereum", decimals: 4, usdPrice: 3200, address: BASE_ADDRESSES.WETH, quickAmounts: Array(0.5, 2, 10, 50) },
-  { symbol: "cbBTC", name: "Coinbase Wrapped BTC", decimals: 4, usdPrice: 95000, address: BASE_ADDRESSES.CBBTC, quickAmounts: Array(0.05, 0.25, 1, 5) }
+  { symbol: "USDC", name: "USD Coin (Base Mainnet)", decimals: 2, usdPrice: 1, address: BASE_ADDRESSES.USDC, quickAmounts: Array(100, 500, 2500, 10000) }
 );
 
 const CURATED_PRESETS = Array(
